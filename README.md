@@ -505,7 +505,7 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for det
 
 ## Security
 
-If you discover any security-related issues, please email security@mrnewport.com instead of using the issue tracker.
+If you discover any security-related issues, please email admin@matthewnewport.com instead of using the issue tracker.
 
 ## Credits
 
@@ -518,7 +518,7 @@ The MIT License (MIT). Please see [License File](LICENSE.md) for more informatio
 
 ## Support
 
-For support, please email support@mrnewport.com or create an issue on GitHub.
+For support, please email admin@matthewnewport.com or create an issue on GitHub.
 
 ## Changelog
 
