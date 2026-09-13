@@ -195,3 +195,33 @@ it('handles network errors gracefully', function () {
     
     $this->plaidClient->post('/test/endpoint');
 })->throws(PlaidRequestException::class, 'Network error');
+it('runs logging middleware without exposing credentials or financial payloads', function () {
+    $logger = Mockery::mock(\Psr\Log\LoggerInterface::class);
+    $logger->shouldReceive('debug')->once()->with('Plaid API Request', ['method' => 'POST', 'path' => '/test/endpoint']);
+    $logger->shouldReceive('debug')->once()->with('Plaid API Response', ['status' => 200]);
+    \Illuminate\Support\Facades\Log::shouldReceive('channel')->once()->with('stack')->andReturn($logger);
+    $this->config['logging']['enabled'] = true;
+    $this->mockHandler->append(new Response(200, [], '{"access_token":"private-response"}'));
+    $response = (new PlaidClient($this->config))->post('/test/endpoint', ['access_token' => 'private-request']);
+    expect($response)->toBe(['access_token' => 'private-response']);
+});
+
+it('retries safe reads but never retries a transfer by default', function () {
+    $this->config['http_options']['retry_delay'] = 0;
+    $this->mockHandler->append(new Response(503), new Response(200, [], '{"ok":true}'));
+    expect((new PlaidClient($this->config))->get('/test/endpoint'))->toBe(['ok' => true]);
+    $this->mockHandler->append(new Response(503), new Response(200, [], '{"duplicate":true}'));
+    expect(fn () => (new PlaidClient($this->config))->post('/transfer/create'))->toThrow(PlaidException::class);
+    expect($this->mockHandler->count())->toBe(1);
+});
+
+it('rejects external URLs before sending credentials', function () {
+    expect(fn () => $this->plaidClient->post('https://example.org/collect'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => $this->plaidClient->post('//example.org/collect'))->toThrow(InvalidArgumentException::class);
+    expect($this->mockHandler->getLastRequest())->toBeNull();
+});
+
+it('reports invalid JSON as a package exception', function () {
+    $this->mockHandler->append(new Response(200, [], 'not json'));
+    expect(fn () => $this->plaidClient->post('/test/endpoint'))->toThrow(PlaidRequestException::class, 'invalid JSON');
+});

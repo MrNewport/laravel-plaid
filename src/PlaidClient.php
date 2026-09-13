@@ -30,24 +30,18 @@ class PlaidClient
 
     protected function createHttpClient(): Client
     {
-        // Use provided handler if available (for testing)
-        $stack = isset($this->config['http_options']['handler']) 
-            ? $this->config['http_options']['handler'] 
-            : HandlerStack::create();
-        
-        // Only add middleware if we created the stack ourselves
-        if (!isset($this->config['http_options']['handler'])) {
-            if ($this->config['logging']['enabled'] ?? false) {
-                $stack->push($this->loggingMiddleware());
-            }
-            
-            if ($this->config['http_options']['retry_enabled'] ?? true) {
-                $stack->push($this->retryMiddleware());
-            }
+        $handler = $this->config['http_options']['handler'] ?? null;
+        $stack = $handler instanceof HandlerStack ? clone $handler : HandlerStack::create($handler);
+        if ($this->config['logging']['enabled'] ?? false) {
+            $stack->push($this->loggingMiddleware());
         }
-        
+        if ($this->config['http_options']['retry_enabled'] ?? true) {
+            $stack->push($this->retryMiddleware());
+        }
+
         return new Client([
             'base_uri' => $this->baseUrl,
+            'allow_redirects' => false,
             'timeout' => $this->config['http_options']['timeout'] ?? 30,
             'connect_timeout' => $this->config['http_options']['connect_timeout'] ?? 10,
             'handler' => $stack,
@@ -62,6 +56,10 @@ class PlaidClient
 
     public function request(string $method, string $endpoint, array $data = []): array
     {
+        $method = strtoupper($method);
+        if (!preg_match('~^/[a-zA-Z0-9_/-]+$~D', $endpoint) || str_starts_with($endpoint, '//')) {
+            throw new \InvalidArgumentException('Pass a Plaid API path, not an absolute URL or query string.');
+        }
         try {
             $options = [];
             
@@ -75,7 +73,19 @@ class PlaidClient
             
             $response = $this->httpClient->request($method, $endpoint, $options);
             
-            return json_decode($response->getBody()->getContents(), true);
+            $body = (string) $response->getBody();
+            if ($response->getStatusCode() === 204) {
+                return [];
+            }
+            try {
+                $decoded = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $exception) {
+                throw new PlaidRequestException('Plaid returned invalid JSON.', 0, $exception);
+            }
+            if (!is_array($decoded)) {
+                throw new PlaidRequestException('Plaid returned an invalid response object.');
+            }
+            return $decoded;
         } catch (GuzzleException $e) {
             $this->handleException($e);
         }
@@ -129,40 +139,32 @@ class PlaidClient
 
     protected function loggingMiddleware(): callable
     {
-        return Middleware::tap(
-            function (RequestInterface $request) {
-                $body = $request->getBody()->getContents();
-                $request->getBody()->rewind();
-                
-                Log::channel($this->config['logging']['channel'] ?? 'stack')->debug('Plaid API Request', [
-                    'method' => $request->getMethod(),
-                    'uri' => (string) $request->getUri(),
-                    'headers' => $this->sanitizeHeaders($request->getHeaders()),
-                    'body' => $this->sanitizeBody(json_decode($body, true)),
+        // Log transport metadata only: financial payloads and credentials never enter logs.
+        return function (callable $handler): callable {
+            return function (RequestInterface $request, array $options) use ($handler) {
+                $logger = Log::channel($this->config['logging']['channel'] ?? 'stack');
+                $logger->debug('Plaid API Request', [
+                    'method' => $request->getMethod(), 'path' => $request->getUri()->getPath(),
                 ]);
-            },
-            function (RequestInterface $request, array $options, ResponseInterface $response) {
-                $body = $response->getBody()->getContents();
-                $response->getBody()->rewind();
-                
-                Log::channel($this->config['logging']['channel'] ?? 'stack')->debug('Plaid API Response', [
-                    'status' => $response->getStatusCode(),
-                    'headers' => $response->getHeaders(),
-                    'body' => $this->sanitizeBody(json_decode($body, true)),
-                ]);
-            }
-        );
+                return $handler($request, $options)->then(function (ResponseInterface $response) use ($logger) {
+                    $logger->debug('Plaid API Response', ['status' => $response->getStatusCode()]);
+                    return $response;
+                });
+            };
+        };
     }
 
     protected function retryMiddleware(): callable
     {
         return Middleware::retry(
-            function ($retries, RequestInterface $request, ResponseInterface $response = null, \Exception $exception = null) {
+            function ($retries, RequestInterface $request, ?ResponseInterface $response = null, ?\Exception $exception = null) {
                 if ($retries >= ($this->config['http_options']['retry_max_attempts'] ?? 3)) {
                     return false;
                 }
                 
-                if ($response && in_array($response->getStatusCode(), [429, 500, 502, 503, 504])) {
+                $safe = in_array($request->getMethod(), ['GET', 'HEAD'], true)
+                    || ($request->getMethod() === 'POST' && in_array($request->getUri()->getPath(), $this->config['http_options']['retry_post_endpoints'] ?? [], true));
+                if ($safe && $response && in_array($response->getStatusCode(), [429, 500, 502, 503, 504])) {
                     return true;
                 }
                 

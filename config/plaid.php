@@ -58,6 +58,8 @@ return [
         'timeout' => env('PLAID_TIMEOUT', 30),
         'connect_timeout' => env('PLAID_CONNECT_TIMEOUT', 10),
         'retry_enabled' => env('PLAID_RETRY_ENABLED', true),
+        // Opt in only known idempotent read-only POST endpoints. Never blanket-retry transfers.
+        'retry_post_endpoints' => [],
         'retry_max_attempts' => env('PLAID_RETRY_MAX_ATTEMPTS', 3),
         'retry_delay' => env('PLAID_RETRY_DELAY', 1000), // milliseconds
     ],

@@ -1,11 +1,28 @@
+# Laravel Plaid
+
+Current release: **2.0.0**. Supported installations: Laravel 12 (PHP 8.2+) and Laravel 13 (PHP 8.3+). CI verifies supported PHP/Laravel combinations. Earlier Laravel versions should remain on the previous major release.
+
+Laravel 12/13 with current development tooling. Fixed logging middleware to operate on asynchronous responses; logs now contain method/path/status only, never headers or payloads. Explicitly rejects external endpoint URLs and disables redirects. Automatic retries apply to safe GET/HEAD requests; retrying POST endpoints requires explicit per-path opt-in. Invalid response JSON produces a package exception.
+
+```sh
+composer require mrnewport/laravel-plaid:^2.0
+composer test # from the package checkout; tests use isolated fixtures
+```
+
+GitHub source and tags are published first. Until the release is indexed on Packagist, add this repository as a Composer VCS repository. Never install test dependencies in your production application's require section.
+
+## Upgrade from 1.x
+
+HTTP middleware now runs with supplied Guzzle handlers as well as the default handler. Request/response payload logging is removed. POST retries are disabled unless the exact endpoint is listed in `http_options.retry_post_endpoints`; only opt in when the operation is idempotent. This package supplies API services, not webhook signature verification or a ready-made webhook route. Never treat the legacy `webhooks.secret` configuration value as a verified webhook implementation. Tests use mocked HTTP responses; no bank access or money transfers are made.
+
+## Existing API reference
+
 # Laravel Plaid Package
 
-A comprehensive, production-ready Laravel package for the Plaid API, providing complete coverage of all Plaid products and endpoints with a clean, intuitive interface.
+Laravel services and DTOs for the Plaid endpoints listed below.
 
 [![Latest Version](https://img.shields.io/packagist/v/mrnewport/laravel-plaid.svg?style=flat-square)](https://packagist.org/packages/mrnewport/laravel-plaid)
 [![MIT License](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
-[![Laravel 10.x](https://img.shields.io/badge/Laravel-10.x-red.svg?style=flat-square)](https://laravel.com)
-[![Laravel 11.x](https://img.shields.io/badge/Laravel-11.x-red.svg?style=flat-square)](https://laravel.com)
 [![Laravel 12.x](https://img.shields.io/badge/Laravel-12.x-red.svg?style=flat-square)](https://laravel.com)
 
 ## Features
@@ -17,12 +34,12 @@ A comprehensive, production-ready Laravel package for the Plaid API, providing c
 - 📝 **Well Documented**: Clear examples and comprehensive documentation
 - ⚡ **Laravel Native**: Service provider, facades, and config publishing
 - 🔄 **Auto Retry**: Configurable retry logic for failed requests
-- 📊 **Request Logging**: Optional request/response logging with sensitive data redaction
+- 📊 **Request Logging**: Optional method/path/status logging without payloads or headers
 
 ## Requirements
 
-- PHP 8.1 or higher
-- Laravel 10.x, 11.x, or 12.x
+- PHP 8.2+ (Laravel 13 requires PHP 8.3+)
+- Laravel 12.x or 13.x
 
 ## Installation
 
@@ -380,7 +397,7 @@ Configure the log channel in `config/logging.php`:
 ],
 ```
 
-Sensitive fields are automatically redacted from logs.
+Only method, path, and response status are logged; payloads and headers are omitted.
 
 ## Testing
 
@@ -486,7 +503,7 @@ $response = $client->post('/custom/endpoint', ['data' => 'value']);
    ```
 
 2. **Rate Limiting**
-   The package automatically retries on rate limit errors. Adjust retry settings:
+   Safe GET/HEAD requests can retry rate-limit errors. POST retries require explicit per-endpoint opt-in. Adjust retry settings:
    ```env
    PLAID_RETRY_MAX_ATTEMPTS=5
    PLAID_RETRY_DELAY=5000

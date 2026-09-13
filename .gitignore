@@ -17,3 +17,9 @@ yarn-error.log
 /.fleet
 /.idea
 /.vscode
+/vendor/
+/composer.lock
+/.phpunit.cache/
+/.phpunit.result.cache
+/.env
+/.env.*
