@@ -1,5 +1,7 @@
 # Laravel Plaid
 
+Read the [complete handbook](docs/HANDBOOK.md) for installation, contracts, configuration, failures and application recipes. The [feature inventory](docs/FEATURES.md) maps implemented behavior to its boundaries.
+
 Current release: **2.0.0**. Supported installations: Laravel 12 (PHP 8.2+) and Laravel 13 (PHP 8.3+). CI verifies supported PHP/Laravel combinations. Earlier Laravel versions should remain on the previous major release.
 
 Laravel 12/13 with current development tooling. Fixed logging middleware to operate on asynchronous responses; logs now contain method/path/status only, never headers or payloads. Explicitly rejects external endpoint URLs and disables redirects. Automatic retries apply to safe GET/HEAD requests; retrying POST endpoints requires explicit per-path opt-in. Invalid response JSON produces a package exception.
@@ -29,7 +31,7 @@ Laravel services and DTOs for the Plaid endpoints listed below.
 
 - 🚀 **Complete API Coverage**: Every Plaid endpoint is implemented
 - 🔒 **Type-Safe**: Full PHP type hints and DTOs for all responses
-- 🛡️ **Production Ready**: Automatic retries, error handling, and logging
+- 🛡️ **Explicit Transport Policies**: Safe retry admission, typed errors, and metadata logging
 - 🧪 **Fully Tested**: 100% test coverage with Pest
 - 📝 **Well Documented**: Clear examples and comprehensive documentation
 - ⚡ **Laravel Native**: Service provider, facades, and config publishing
@@ -346,38 +348,15 @@ try {
 
 ## Webhooks
 
-Handle Plaid webhooks in your application:
+This package does not implement Plaid webhook signature verification or register a receiver route. The `webhooks.secret` and `webhooks.tolerance` keys are reserved configuration, not an authentication mechanism.
 
-```php
-Route::post('/webhooks/plaid', function (Request $request) {
-    $webhookType = $request->input('webhook_type');
-    $webhookCode = $request->input('webhook_code');
-    
-    switch ($webhookType) {
-        case 'TRANSACTIONS':
-            if ($webhookCode === 'SYNC_UPDATES_AVAILABLE') {
-                // Sync new transactions
-                $itemId = $request->input('item_id');
-                dispatch(new SyncPlaidTransactions($itemId));
-            }
-            break;
-            
-        case 'ITEM':
-            if ($webhookCode === 'ERROR') {
-                // Handle item errors
-                $error = $request->input('error');
-                // Notify user to re-authenticate
-            }
-            break;
-    }
-    
-    return response()->json(['status' => 'ok']);
-});
-```
+The host must authenticate the provider delivery using a separately reviewed verifier, authorize the item/workspace mapping, durably deduplicate the event and enqueue the appropriate sync job. Only then should application code inspect `webhook_type` and `webhook_code`. Do not expose a receiver that trusts decoded JSON merely because those fields look familiar.
+
+See the [handbook](docs/HANDBOOK.md#application-ownership-and-deployment) for the complete application boundary.
 
 ## Logging
 
-Enable request/response logging for debugging:
+Enable method/path/status metadata logging for debugging:
 
 ```env
 PLAID_LOGGING_ENABLED=true
@@ -527,7 +506,7 @@ If you discover any security-related issues, please email admin@matthewnewport.c
 ## Credits
 
 - [MrNewport](https://github.com/mrnewport)
-- [All Contributors](../../contributors)
+- [All Contributors](https://github.com/MrNewport/laravel-plaid/graphs/contributors)
 
 ## License
 
