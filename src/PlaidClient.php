@@ -56,6 +56,50 @@ class PlaidClient
 
     public function request(string $method, string $endpoint, array $data = []): array
     {
+        $response = $this->send($method, $endpoint, $data);
+        $body = (string) $response->getBody();
+        if ($response->getStatusCode() === 204) {
+            return [];
+        }
+        try {
+            $decoded = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            throw new PlaidRequestException('Plaid returned invalid JSON.', 0, $exception);
+        }
+        if (!is_array($decoded)) {
+            throw new PlaidRequestException('Plaid returned an invalid response object.');
+        }
+        return $decoded;
+    }
+
+    /** Preserve JSON number text for consumers that require exact money. */
+    public function requestRaw(string $method, string $endpoint, array $data = [], int $maxBytes = 8388608): string
+    {
+        if ($maxBytes < 1 || $maxBytes > 8388608) {
+            throw new \InvalidArgumentException('Choose a bounded Plaid response size.');
+        }
+        $stream = $this->send($method, $endpoint, $data)->getBody();
+        $body = '';
+        while (!$stream->eof()) {
+            $chunk = $stream->read(min(8192, $maxBytes + 1 - strlen($body)));
+            if ($chunk === '' && !$stream->eof()) {
+                throw new PlaidRequestException('Plaid response stream stopped unexpectedly.');
+            }
+            $body .= $chunk;
+            if (strlen($body) > $maxBytes) {
+                throw new PlaidRequestException('Plaid response exceeds the supported bound.');
+            }
+        }
+        return $body;
+    }
+
+    public function postRaw(string $endpoint, array $data = [], int $maxBytes = 8388608): string
+    {
+        return $this->requestRaw('POST', $endpoint, $data, $maxBytes);
+    }
+
+    protected function send(string $method, string $endpoint, array $data): ResponseInterface
+    {
         $method = strtoupper($method);
         if (!preg_match('~^/[a-zA-Z0-9_/-]+$~D', $endpoint) || str_starts_with($endpoint, '//')) {
             throw new \InvalidArgumentException('Pass a Plaid API path, not an absolute URL or query string.');
@@ -71,21 +115,7 @@ class PlaidClient
                 }
             }
             
-            $response = $this->httpClient->request($method, $endpoint, $options);
-            
-            $body = (string) $response->getBody();
-            if ($response->getStatusCode() === 204) {
-                return [];
-            }
-            try {
-                $decoded = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
-            } catch (\JsonException $exception) {
-                throw new PlaidRequestException('Plaid returned invalid JSON.', 0, $exception);
-            }
-            if (!is_array($decoded)) {
-                throw new PlaidRequestException('Plaid returned an invalid response object.');
-            }
-            return $decoded;
+            return $this->httpClient->request($method, $endpoint, $options);
         } catch (GuzzleException $e) {
             $this->handleException($e);
         }

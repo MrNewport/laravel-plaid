@@ -3,10 +3,73 @@
 namespace MrNewport\LaravelPlaid\Services;
 
 use MrNewport\LaravelPlaid\DTOs\Transaction;
+use MrNewport\LaravelPlaid\DTOs\ExactTransaction;
+use MrNewport\LaravelPlaid\Exceptions\PlaidRequestException;
+use MrNewport\LaravelPlaid\Support\ExactJsonNumbers;
 
 class TransactionsService extends BaseService
 {
     public function sync(string $accessToken, ?string $cursor = null, int $count = 100, array $options = []): array
+    {
+        $response = $this->client->post('/transactions/sync', $this->syncRequest($accessToken, $cursor, $count, $options));
+
+        return [
+            'added' => array_map(fn($transaction) => new Transaction($transaction), $response['added']),
+            'modified' => array_map(fn($transaction) => new Transaction($transaction), $response['modified']),
+            'removed' => $response['removed'],
+            'next_cursor' => $response['next_cursor'],
+            'has_more' => $response['has_more'],
+            'request_id' => $response['request_id'],
+        ];
+    }
+
+    /** Exact source facts for read-only financial imports; existing sync() is unchanged. */
+    public function syncExact(string $accessToken, ?string $cursor = null, int $count = 100,
+        array $options = []): array
+    {
+        if ($accessToken === '' || $count < 1 || $count > 500) {
+            throw new \InvalidArgumentException('Choose a bounded Plaid transaction request.');
+        }
+        $body = $this->client->postRaw('/transactions/sync',
+            $this->syncRequest($accessToken, $cursor, $count, $options));
+        $parsed = ExactJsonNumbers::decode($body);
+        $response = $parsed['data'];
+        foreach (['added', 'modified', 'removed'] as $key) {
+            if (! is_array($response[$key] ?? null) || ! array_is_list($response[$key])
+                || count($response[$key]) > 500) {
+                throw new PlaidRequestException('Plaid returned an unsupported transaction page.');
+            }
+        }
+        if (! is_bool($response['has_more'] ?? null)
+            || ! is_string($response['next_cursor'] ?? null)
+            || strlen($response['next_cursor']) > 4096
+            || ! is_string($response['request_id'] ?? null)
+            || strlen($response['request_id']) > 255) {
+            throw new PlaidRequestException('Plaid returned an unsupported transaction cursor.');
+        }
+        $removed = [];
+        foreach ($response['removed'] as $row) {
+            if (! is_array($row)) {
+                throw new PlaidRequestException('Plaid returned an unsupported removed transaction.');
+            }
+            $removed[] = [
+                'transaction_id' => ExactTransaction::identifier($row['transaction_id'] ?? null),
+                'account_id' => ExactTransaction::identifier($row['account_id'] ?? null),
+            ];
+        }
+
+        return [
+            'added' => array_map(fn ($row) => new ExactTransaction($row, $parsed['marker']), $response['added']),
+            'modified' => array_map(fn ($row) => new ExactTransaction($row, $parsed['marker']), $response['modified']),
+            'removed' => $removed,
+            'next_cursor' => $response['next_cursor'],
+            'has_more' => $response['has_more'],
+            'request_id' => $response['request_id'],
+            'response_sha256' => hash('sha256', $body),
+        ];
+    }
+
+    private function syncRequest(string $accessToken, ?string $cursor, int $count, array $options): array
     {
         $data = [
             'access_token' => $accessToken,
@@ -24,16 +87,7 @@ class TransactionsService extends BaseService
             $data['options'] = $options;
         }
         
-        $response = $this->client->post('/transactions/sync', $data);
-        
-        return [
-            'added' => array_map(fn($transaction) => new Transaction($transaction), $response['added']),
-            'modified' => array_map(fn($transaction) => new Transaction($transaction), $response['modified']),
-            'removed' => $response['removed'],
-            'next_cursor' => $response['next_cursor'],
-            'has_more' => $response['has_more'],
-            'request_id' => $response['request_id'],
-        ];
+        return $data;
     }
 
     public function get(

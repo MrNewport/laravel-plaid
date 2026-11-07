@@ -137,6 +137,8 @@ foreach ($response['accounts'] as $account) {
 
 ### Get Transactions
 
+The original `sync()` method below is retained for compatibility. Its `Transaction::amount` is a PHP float and its DTO does not retain every source currency/pending field. **Do not use it for exact accounting or infer a posted balance from it.**
+
 ```php
 // Using the new Transactions Sync endpoint (recommended)
 $cursor = $user->plaid_cursor; // Store cursor for incremental updates
@@ -172,6 +174,19 @@ while ($hasMore) {
 $user->plaid_cursor = $cursor;
 $user->save();
 ```
+
+For a read-only financial source, use `syncExact()` instead. It returns `ExactTransaction` objects with `amount_decimal` as the original plain JSON-number text, `iso_currency_code` or `unofficial_currency_code`, `pending`, `pending_transaction_id`, account and transaction IDs, and date. `removed` contains exact account/transaction IDs; the envelope retains `next_cursor`, `has_more`, `request_id` and a SHA-256 of the original response bytes. Quoted amounts, exponent notation, unsupported currencies and missing pending fields fail closed. The method never rounds to a float and does not post accounting entries.
+
+```php
+$page = Plaid::transactions()->syncExact($accessToken, $committedCursor, 100);
+foreach ($page['added'] as $transaction) {
+    $sourceAmount = $transaction->amount_decimal; // Exact source text, e.g. "-12.50"
+    $sourceCurrency = $transaction->iso_currency_code;
+    // Validate currency precision and map the source amount in your own domain.
+}
+```
+
+Stage all pages from the same committed cursor and advance that cursor only after a complete `has_more=false` update. If Plaid reports a mutation during pagination, discard staged pages and restart at the original cursor. Preserve pending removals and posted additions as separate source events; Plaid can return them on different pages. The package supplies transport facts, not consent, tenancy, reconciliation, webhook verification, token storage or transfers.
 
 ### Get Auth Information
 
