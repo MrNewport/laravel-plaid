@@ -175,7 +175,7 @@ $user->plaid_cursor = $cursor;
 $user->save();
 ```
 
-For a read-only financial source, use `syncExact()` instead. It returns `ExactTransaction` objects with `amount_decimal` as the original plain JSON-number text, `iso_currency_code` or `unofficial_currency_code`, `pending`, `pending_transaction_id`, account and transaction IDs, and date. `removed` contains exact account/transaction IDs; the envelope retains `next_cursor`, `has_more`, `request_id` and a SHA-256 of the original response bytes. Quoted amounts, exponent notation, unsupported currencies and missing pending fields fail closed. The method never rounds to a float and does not post accounting entries.
+For a read-only financial source, use `syncExact()` instead. It returns `ExactTransaction` objects with `amount_decimal` as the original plain JSON-number text, `iso_currency_code` or `unofficial_currency_code`, `pending`, `pending_transaction_id`, account and transaction IDs, and date. `removed` contains exact account/transaction IDs; the envelope retains `next_cursor`, `has_more`, `request_id` and a SHA-256 of the original response bytes. Quoted amounts, exponent notation, unsupported currencies, missing pending fields and excessively large or complex pages fail closed. The exact path requests a streamed HTTP body and bounds raw and transformed parsing. It never rounds to a float and does not post accounting entries.
 
 ```php
 $page = Plaid::transactions()->syncExact($accessToken, $committedCursor, 100);

@@ -7,6 +7,7 @@ use MrNewport\LaravelPlaid\DTOs\ExactTransaction;
 use MrNewport\LaravelPlaid\Exceptions\PlaidRequestException;
 use MrNewport\LaravelPlaid\PlaidClient;
 use MrNewport\LaravelPlaid\Services\TransactionsService;
+use MrNewport\LaravelPlaid\Support\ExactJsonNumbers;
 
 beforeEach(function () {
     $this->wire = new MockHandler();
@@ -119,4 +120,52 @@ it('leaves the established sync method and response shape available', function (
     expect($legacy)->toHaveKeys(['added', 'modified', 'removed', 'next_cursor', 'has_more', 'request_id'])
         ->and($legacy['added'][0]->amount)->toBe(1.25)
         ->and($legacy['next_cursor'])->toBe('c');
+});
+
+it('stops millions of numeric tokens in a near-limit wire body before expansion', function () {
+    $body = '{"numbers":['.str_repeat('0,', 3999999).'0]}';
+    expect(strlen($body))->toBeGreaterThan(7900000)
+        ->toBeLessThan(8388608);
+
+    expect(fn () => ExactJsonNumbers::decode($body))
+        ->toThrow(PlaidRequestException::class, 'too many numeric facts');
+});
+
+it('stops rewritten JSON growth even when raw bytes and token count are within limits', function () {
+    $body = '{"padding":"'.str_repeat('x', 8000000).'","numbers":['
+        .str_repeat('0,', 14999).'0]}';
+    expect(strlen($body))->toBeLessThan(8388608);
+
+    expect(fn () => ExactJsonNumbers::decode($body))
+        ->toThrow(PlaidRequestException::class, 'expansion exceeds');
+});
+
+it('stops a large nonnumeric value array before native JSON decoding', function () {
+    $body = '{"values":['.str_repeat('true,', 200000).'true]}';
+    expect(fn () => ExactJsonNumbers::decode($body))
+        ->toThrow(PlaidRequestException::class, 'too many JSON facts');
+});
+
+it('requests streaming only for the exact raw path and bounds oversized HTTP errors', function () {
+    $seen = [];
+    $handler = function ($request, array $options) use (&$seen) {
+        $seen[] = $options;
+        return \GuzzleHttp\Promise\Create::promiseFor(new Response(200, [],
+            '{"added":[],"modified":[],"removed":[],"next_cursor":"c","has_more":false,"request_id":"r"}'));
+    };
+    $client = new PlaidClient([
+        'client_id' => 'fictional-client', 'secret' => 'fictional-secret',
+        'environment' => 'sandbox', 'version' => '2020-09-14',
+        'urls' => ['sandbox' => 'https://sandbox.plaid.com'],
+        'http_options' => ['handler' => HandlerStack::create($handler), 'retry_enabled' => false],
+        'logging' => ['enabled' => false],
+    ]);
+    $client->postRaw('/transactions/sync');
+    $client->post('/transactions/sync');
+    expect($seen[0]['stream'])->toBeTrue()
+        ->and(array_key_exists('stream', $seen[1]))->toBeFalse();
+
+    $this->wire->append(new Response(400, [], str_repeat('private-token', 10000)));
+    expect(fn () => $this->service->syncExact('private-token'))
+        ->toThrow(PlaidRequestException::class, 'error response exceeds');
 });

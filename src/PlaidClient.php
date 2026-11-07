@@ -78,7 +78,7 @@ class PlaidClient
         if ($maxBytes < 1 || $maxBytes > 8388608) {
             throw new \InvalidArgumentException('Choose a bounded Plaid response size.');
         }
-        $stream = $this->send($method, $endpoint, $data)->getBody();
+        $stream = $this->send($method, $endpoint, $data, true)->getBody();
         $body = '';
         while (!$stream->eof()) {
             $chunk = $stream->read(min(8192, $maxBytes + 1 - strlen($body)));
@@ -98,7 +98,8 @@ class PlaidClient
         return $this->requestRaw('POST', $endpoint, $data, $maxBytes);
     }
 
-    protected function send(string $method, string $endpoint, array $data): ResponseInterface
+    protected function send(string $method, string $endpoint, array $data,
+        bool $streamResponse = false): ResponseInterface
     {
         $method = strtoupper($method);
         if (!preg_match('~^/[a-zA-Z0-9_/-]+$~D', $endpoint) || str_starts_with($endpoint, '//')) {
@@ -106,6 +107,9 @@ class PlaidClient
         }
         try {
             $options = [];
+            if ($streamResponse) {
+                $options['stream'] = true;
+            }
             
             if (!empty($data)) {
                 if ($method === 'GET') {
@@ -117,7 +121,7 @@ class PlaidClient
             
             return $this->httpClient->request($method, $endpoint, $options);
         } catch (GuzzleException $e) {
-            $this->handleException($e);
+            $this->handleException($e, $streamResponse ? 65536 : null);
         }
     }
 
@@ -141,15 +145,34 @@ class PlaidClient
         return $this->request('PATCH', $endpoint, $data);
     }
 
-    protected function handleException(GuzzleException $exception): void
+    protected function handleException(GuzzleException $exception, ?int $maxErrorBytes = null): void
     {
         if (!method_exists($exception, 'hasResponse') || !$exception->hasResponse()) {
+            if ($maxErrorBytes !== null) {
+                throw new PlaidRequestException('Plaid transport failed.', 0, $exception);
+            }
             throw new PlaidRequestException('Network error: ' . $exception->getMessage(), 0, $exception);
         }
         
         $response = $exception->getResponse();
         $statusCode = $response->getStatusCode();
-        $body = json_decode($response->getBody()->getContents(), true);
+        if ($maxErrorBytes === null) {
+            $rawError = $response->getBody()->getContents();
+        } else {
+            $rawError = '';
+            $stream = $response->getBody();
+            while (!$stream->eof()) {
+                $chunk = $stream->read(min(8192, $maxErrorBytes + 1 - strlen($rawError)));
+                if ($chunk === '' && !$stream->eof()) {
+                    throw new PlaidRequestException('Plaid error response stream stopped unexpectedly.');
+                }
+                $rawError .= $chunk;
+                if (strlen($rawError) > $maxErrorBytes) {
+                    throw new PlaidRequestException('Plaid error response exceeds the supported bound.');
+                }
+            }
+        }
+        $body = json_decode($rawError, true);
         
         $errorMessage = $body['error_message'] ?? 'Unknown error';
         $errorCode = $body['error_code'] ?? 'UNKNOWN_ERROR';
