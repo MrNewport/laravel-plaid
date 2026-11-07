@@ -28,6 +28,7 @@ it('creates Plaid instance with all services accessible', function () {
         'statements' => \MrNewport\LaravelPlaid\Services\StatementsService::class,
         'transactions' => \MrNewport\LaravelPlaid\Services\TransactionsService::class,
         'transfer' => \MrNewport\LaravelPlaid\Services\TransferService::class,
+        'webhookVerification' => \MrNewport\LaravelPlaid\Services\WebhookVerificationService::class,
     ];
     
     foreach ($services as $method => $expectedClass) {

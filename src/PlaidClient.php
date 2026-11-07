@@ -130,6 +130,17 @@ class PlaidClient
         return $this->request('POST', $endpoint, $data);
     }
 
+    /** The fixed API environment used for credentialed requests. */
+    public function environment(): string
+    {
+        return (string) ($this->config['environment'] ?? '');
+    }
+
+    public function baseUrl(): string
+    {
+        return $this->baseUrl;
+    }
+
     public function get(string $endpoint, array $params = []): array
     {
         return $this->request('GET', $endpoint, $params);

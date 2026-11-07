@@ -17,7 +17,7 @@ GitHub source and tags are published first. Until the release is indexed on Pack
 
 ## Upgrade from 1.x
 
-HTTP middleware now runs with supplied Guzzle handlers as well as the default handler. Request/response payload logging is removed. POST retries are disabled unless the exact endpoint is listed in `http_options.retry_post_endpoints`; only opt in when the operation is idempotent. This package supplies API services, not webhook signature verification or a ready-made webhook route. Never treat the legacy `webhooks.secret` configuration value as a verified webhook implementation. Tests use mocked HTTP responses; no bank access or money transfers are made.
+HTTP middleware now runs with supplied Guzzle handlers as well as the default handler. Request/response payload logging is removed. POST retries are disabled unless the exact endpoint is listed in `http_options.retry_post_endpoints`; only opt in when the operation is idempotent. The unreleased private candidate adds package-owned `webhookVerification()` using Plaid's ES256/JWK contract. It does not supply an application route, Item authority or replay policy. Never treat the legacy `webhooks.secret` configuration value as a verified webhook implementation. Tests use mocked HTTP responses; no bank access or money transfers are made.
 
 ## Existing API reference
 
@@ -66,7 +66,7 @@ Add your Plaid credentials to your `.env` file:
 ```env
 PLAID_CLIENT_ID=your_client_id
 PLAID_SECRET=your_secret_key
-PLAID_ENVIRONMENT=sandbox # sandbox, development, or production
+PLAID_ENVIRONMENT=sandbox # use sandbox or production for signed webhook verification
 PLAID_VERSION=2020-09-14
 ```
 
@@ -80,9 +80,8 @@ PLAID_RETRY_ENABLED=true
 PLAID_RETRY_MAX_ATTEMPTS=3
 PLAID_RETRY_DELAY=1000
 
-# Webhook Configuration
-PLAID_WEBHOOK_SECRET=your_webhook_secret
-PLAID_WEBHOOK_TOLERANCE=300
+# Plaid webhooks use signed ES256 JWTs, not a shared webhook secret.
+# Leave the historical PLAID_WEBHOOK_SECRET slot unset.
 
 # Logging
 PLAID_LOGGING_ENABLED=false
@@ -186,7 +185,7 @@ foreach ($page['added'] as $transaction) {
 }
 ```
 
-Stage all pages from the same committed cursor and advance that cursor only after a complete `has_more=false` update. If Plaid reports a mutation during pagination, discard staged pages and restart at the original cursor. Preserve pending removals and posted additions as separate source events; Plaid can return them on different pages. The package supplies transport facts, not consent, tenancy, reconciliation, webhook verification, token storage or transfers.
+Stage all pages from the same committed cursor and advance that cursor only after a complete `has_more=false` update. If Plaid reports a mutation during pagination, discard staged pages and restart at the original cursor. Preserve pending removals and posted additions as separate source events; Plaid can return them on different pages. The package supplies transport facts and signed-webhook verification, not consent, tenancy, reconciliation, token storage or transfers.
 
 ### Get Auth Information
 
@@ -365,11 +364,18 @@ try {
 
 ## Webhooks
 
-This package does not implement Plaid webhook signature verification or register a receiver route. The `webhooks.secret` and `webhooks.tolerance` keys are reserved configuration, not an authentication mechanism.
+The verifier checks the exact raw body **before** business fields are read. Plaid publishes an ES256 JWT in `Plaid-Verification`; this package fetches the public JWK by `kid` through the configured Plaid API environment and checks the signature, five-minute issued-at window, and raw-body SHA-256. It bounds the JWT/body size and key fetches. The host must rate-limit the receiver, bind the verified Item to current tenancy/environment/consent, deduplicate deliveries, and schedule a guarded sync. Never post a journal or transfer from a webhook. No receiver route is registered by this package.
 
-The host must authenticate the provider delivery using a separately reviewed verifier, authorize the item/workspace mapping, durably deduplicate the event and enqueue the appropriate sync job. Only then should application code inspect `webhook_type` and `webhook_code`. Do not expose a receiver that trusts decoded JSON merely because those fields look familiar.
+```php
+$verified = Plaid::webhookVerification()->verify(
+    $request->header('Plaid-Verification', ''), $request->getContent()
+);
+// In your application: look up verified body.item_id in the current environment,
+// check its active tenant/consent, save an immutable deduplicated inbox receipt,
+// then queue the existing guarded transactions sync. Unknown Items fail closed.
+```
 
-See the [handbook](docs/HANDBOOK.md#application-ownership-and-deployment) for the complete application boundary.
+See the [handbook](docs/HANDBOOK.md#application-ownership-and-deployment) for the application boundary.
 
 ## Logging
 

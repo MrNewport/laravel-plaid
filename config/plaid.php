@@ -73,6 +73,8 @@ return [
     |
     */
     'webhooks' => [
+        // Historical, unused compatibility slot. Plaid signs webhooks with ES256 JWT/JWK;
+        // do not treat this value as a signature verifier or populate it for that purpose.
         'secret' => env('PLAID_WEBHOOK_SECRET'),
         'tolerance' => env('PLAID_WEBHOOK_TOLERANCE', 300), // seconds
     ],
