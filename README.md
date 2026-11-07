@@ -1,5 +1,7 @@
 # Laravel Plaid
 
+Explore the [interactive workshop](https://matthewnewport.com/packages/laravel-plaid/lab) with editable examples, package output and integration code.
+
 Read the [complete handbook](docs/HANDBOOK.md) for installation, contracts, configuration, failures and application recipes. The [feature inventory](docs/FEATURES.md) maps implemented behavior to its boundaries.
 
 Current release: **2.0.0**. Supported installations: Laravel 12 (PHP 8.2+) and Laravel 13 (PHP 8.3+). CI verifies supported PHP/Laravel combinations. Earlier Laravel versions should remain on the previous major release.
