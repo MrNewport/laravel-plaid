@@ -364,7 +364,7 @@ try {
 
 ## Webhooks
 
-The verifier checks the exact raw body **before** business fields are read. Plaid publishes an ES256 JWT in `Plaid-Verification`; this package fetches the public JWK by `kid` through the configured Plaid API environment and checks the signature, five-minute issued-at window, and raw-body SHA-256. It bounds the JWT/body size and key fetches. The host must rate-limit the receiver, bind the verified Item to current tenancy/environment/consent, deduplicate deliveries, and schedule a guarded sync. Never post a journal or transfer from a webhook. No receiver route is registered by this package.
+The verifier checks the exact raw body **before** business fields are read. Plaid publishes an ES256 JWT in `Plaid-Verification`; this package fetches the public JWK by `kid` through the configured Plaid API environment and checks the signature, five-minute issued-at window, and raw-body SHA-256. It bounds the JWT/body size, streamed key response, and key fetches. The host must rate-limit the receiver, bind the verified Item to current tenancy/environment/consent, deduplicate deliveries, and schedule a guarded sync. Never post a journal or transfer from a webhook. No receiver route is registered by this package.
 
 ```php
 $verified = Plaid::webhookVerification()->verify(

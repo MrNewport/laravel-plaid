@@ -12,6 +12,7 @@ final class WebhookVerificationService extends BaseService
 {
     private const MAX_JWT_BYTES = 8192;
     private const MAX_BODY_BYTES = 65536;
+    private const MAX_KEY_RESPONSE_BYTES = 16384;
     private const MAX_KEY_CACHE = 32;
     private const KEY_CACHE_SECONDS = 300;
 
@@ -102,7 +103,12 @@ final class WebhookVerificationService extends BaseService
             throw new PlaidRequestException('Plaid webhook verification is temporarily unavailable.');
         }
         try {
-            $response = $this->client->post('/webhook_verification_key/get', ['key_id' => $kid]);
+            $raw = $this->client->postRaw('/webhook_verification_key/get',
+                ['key_id' => $kid], self::MAX_KEY_RESPONSE_BYTES);
+            $response = json_decode($raw, true, 16, JSON_THROW_ON_ERROR);
+            if (! is_array($response) || array_is_list($response)) {
+                throw self::refused();
+            }
             $key = $response['key'] ?? null;
         } catch (Throwable) {
             $this->rejectKid($cacheId, $now);

@@ -182,3 +182,23 @@ it('hides a provider key-fetch failure and accepts a new signed key by exact ID'
             ->not->toContain('private-provider-data');
     }
 });
+
+it('bounds and sanitizes oversized or deeply nested provider key responses before JWK parsing', function () {
+    [$private] = webhookKeyPair('key-bounded');
+    $body = '{"item_id":"item-A"}';
+    $wire = new MockHandler([
+        new Response(200, [], str_repeat(' ', 16385)),
+        new Response(200, [], '{"key":'.str_repeat('[', 20).'0'.str_repeat(']', 20).'}'),
+    ]);
+    $service = webhookService($wire);
+    foreach (['key-bounded', 'key-nested'] as $kid) {
+        try {
+            $service->verify(webhookJwt($private, $kid, $body), $body);
+            test()->fail('Unbounded provider response was accepted.');
+        } catch (PlaidRequestException $error) {
+            expect($error->getMessage())->toBe('Plaid webhook verification is temporarily unavailable.')
+                ->not->toContain('item-A');
+        }
+    }
+    expect($wire->count())->toBe(0);
+});
