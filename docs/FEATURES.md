@@ -14,7 +14,7 @@
 | Link and item lifecycle wrappers | `LinkTokenService`, `ItemService` | Consent, browser flow and token vault are host owned |
 | Account/auth/transaction DTO paths | `AccountsService`, `AuthService`, `TransactionsService`, `DTOs/*` | DTOs are projections, not full response validators |
 | Cursor-based transaction page | `TransactionsService::sync()` | Host loops, deduplicates and commits cursors |
-| Exact transaction sync facts | `TransactionsService::syncExact()` and `ExactTransaction` | Bounded raw numeric lexemes, currency, pending links, removals and cursor; host owns persisted Item/cursor state |
+| Exact transaction sync facts | `TransactionsService::syncExact()` and `ExactTransaction` | Bounded raw numeric lexemes, currency, pending links, removals and cursor; optional top-level account filter gives each account a distinct cursor; host owns persisted Item/account cursor state |
 | Plaid webhook signature verification | `Plaid::webhookVerification()` | Bounded ES256 JWT/JWK and exact raw-body check; host owns receiver, Item authority, replay inbox and work queue |
 | Assets, institutions, identity, income and employment wrappers | Corresponding service classes | Verify enabled products and provider contracts |
 | Investments and liabilities wrappers | Corresponding service classes | No accounting ledger or reconciliation policy |

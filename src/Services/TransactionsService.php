@@ -25,13 +25,24 @@ class TransactionsService extends BaseService
 
     /** Exact source facts for read-only financial imports; existing sync() is unchanged. */
     public function syncExact(string $accessToken, ?string $cursor = null, int $count = 100,
-        array $options = []): array
+        array $options = [], ?string $accountId = null): array
     {
         if ($accessToken === '' || $count < 1 || $count > 500) {
             throw new \InvalidArgumentException('Choose a bounded Plaid transaction request.');
         }
-        $body = $this->client->postRaw('/transactions/sync',
-            $this->syncRequest($accessToken, $cursor, $count, $options));
+        if (array_key_exists('account_id', $options)) {
+            throw new \InvalidArgumentException('Pass the Plaid account filter as a top-level argument.');
+        }
+        if ($accountId !== null && (strlen($accountId) < 1 || strlen($accountId) > 255
+            || preg_match('/[\x00-\x20\x7f]/', $accountId))) {
+            throw new \InvalidArgumentException('Choose a valid Plaid account identifier.');
+        }
+        $request = $this->syncRequest($accessToken, $cursor, $count, $options);
+        if ($accountId !== null) {
+            // Plaid keeps a distinct cursor per account when this top-level field is set.
+            $request['account_id'] = $accountId;
+        }
+        $body = $this->client->postRaw('/transactions/sync', $request);
         $parsed = ExactJsonNumbers::decode($body);
         $response = $parsed['data'];
         foreach (['added', 'modified', 'removed'] as $key) {

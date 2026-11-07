@@ -60,6 +60,41 @@ it('passes the saved cursor and original token to the next exact page', function
         ]);
 });
 
+it('uses a top-level account filter with an independent cursor per account', function () {
+    $empty = '{"added":[],"modified":[],"removed":[],"next_cursor":"next","has_more":false,"request_id":"request"}';
+    $this->wire->append(new Response(200, [], $empty), new Response(200, [], $empty),
+        new Response(200, [], $empty));
+
+    $this->service->syncExact('private-token', 'account-A-cursor', 20,
+        ['include_original_description' => true], 'account-A');
+    expect(json_decode((string) $this->wire->getLastRequest()->getBody(), true))->toBe([
+        'access_token' => 'private-token', 'cursor' => 'account-A-cursor',
+        'count' => 20, 'options' => ['include_original_description' => true],
+        'account_id' => 'account-A',
+    ]);
+
+    $this->service->syncExact('private-token', 'account-B-cursor', 100, [], 'account-B');
+    expect(json_decode((string) $this->wire->getLastRequest()->getBody(), true))->toBe([
+        'access_token' => 'private-token', 'cursor' => 'account-B-cursor',
+        'account_id' => 'account-B',
+    ]);
+
+    $this->service->syncExact('private-token', 'item-cursor');
+    expect(json_decode((string) $this->wire->getLastRequest()->getBody(), true))->toBe([
+        'access_token' => 'private-token', 'cursor' => 'item-cursor',
+    ]);
+});
+
+it('rejects malformed account filters before sending a provider request', function () {
+    foreach (['', ' account-A', "account-A\n", str_repeat('a', 256)] as $accountId) {
+        expect(fn () => $this->service->syncExact('private-token', null, 100, [], $accountId))
+            ->toThrow(InvalidArgumentException::class);
+    }
+    expect(fn () => $this->service->syncExact('private-token', null, 100,
+        ['account_id' => 'account-A']))->toThrow(InvalidArgumentException::class);
+    expect($this->wire->count())->toBe(0);
+});
+
 it('refuses a quoted, exponential, missing-currency or missing-pending amount', function ($replacement) {
     $body = '{"added":[{"transaction_id":"a","account_id":"b","amount":1.25,"iso_currency_code":"USD","unofficial_currency_code":null,"pending":false,"date":"2030-11-05"}],"modified":[],"removed":[],"next_cursor":"c","has_more":false,"request_id":"r"}';
     $this->wire->append(new Response(200, [], str_replace($replacement[0], $replacement[1], $body)));

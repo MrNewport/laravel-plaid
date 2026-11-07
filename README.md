@@ -185,6 +185,8 @@ foreach ($page['added'] as $transaction) {
 }
 ```
 
+To sync one account, pass its ID as the fifth argument: `syncExact($accessToken, $accountCursor, 100, [], $accountId)`. The package sends `account_id` at the top level of Plaid's request. Keep a separate committed cursor for each account. A cursor from an Item-wide sync or another account must not be reused for that account; start with a null cursor when changing scope. Omitting the fifth argument preserves Item-wide sync.
+
 Stage all pages from the same committed cursor and advance that cursor only after a complete `has_more=false` update. If Plaid reports a mutation during pagination, discard staged pages and restart at the original cursor. Preserve pending removals and posted additions as separate source events; Plaid can return them on different pages. The package supplies transport facts and signed-webhook verification, not consent, tenancy, reconciliation, token storage or transfers.
 
 ### Get Auth Information
