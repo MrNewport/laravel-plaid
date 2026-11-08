@@ -56,12 +56,60 @@ class PlaidClient
 
     public function request(string $method, string $endpoint, array $data = []): array
     {
+        $response = $this->send($method, $endpoint, $data);
+        $body = (string) $response->getBody();
+        if ($response->getStatusCode() === 204) {
+            return [];
+        }
+        try {
+            $decoded = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            throw new PlaidRequestException('Plaid returned invalid JSON.', 0, $exception);
+        }
+        if (!is_array($decoded)) {
+            throw new PlaidRequestException('Plaid returned an invalid response object.');
+        }
+        return $decoded;
+    }
+
+    /** Preserve JSON number text for consumers that require exact money. */
+    public function requestRaw(string $method, string $endpoint, array $data = [], int $maxBytes = 8388608): string
+    {
+        if ($maxBytes < 1 || $maxBytes > 8388608) {
+            throw new \InvalidArgumentException('Choose a bounded Plaid response size.');
+        }
+        $stream = $this->send($method, $endpoint, $data, true)->getBody();
+        $body = '';
+        while (!$stream->eof()) {
+            $chunk = $stream->read(min(8192, $maxBytes + 1 - strlen($body)));
+            if ($chunk === '' && !$stream->eof()) {
+                throw new PlaidRequestException('Plaid response stream stopped unexpectedly.');
+            }
+            $body .= $chunk;
+            if (strlen($body) > $maxBytes) {
+                throw new PlaidRequestException('Plaid response exceeds the supported bound.');
+            }
+        }
+        return $body;
+    }
+
+    public function postRaw(string $endpoint, array $data = [], int $maxBytes = 8388608): string
+    {
+        return $this->requestRaw('POST', $endpoint, $data, $maxBytes);
+    }
+
+    protected function send(string $method, string $endpoint, array $data,
+        bool $streamResponse = false): ResponseInterface
+    {
         $method = strtoupper($method);
         if (!preg_match('~^/[a-zA-Z0-9_/-]+$~D', $endpoint) || str_starts_with($endpoint, '//')) {
             throw new \InvalidArgumentException('Pass a Plaid API path, not an absolute URL or query string.');
         }
         try {
             $options = [];
+            if ($streamResponse) {
+                $options['stream'] = true;
+            }
             
             if (!empty($data)) {
                 if ($method === 'GET') {
@@ -71,29 +119,26 @@ class PlaidClient
                 }
             }
             
-            $response = $this->httpClient->request($method, $endpoint, $options);
-            
-            $body = (string) $response->getBody();
-            if ($response->getStatusCode() === 204) {
-                return [];
-            }
-            try {
-                $decoded = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
-            } catch (\JsonException $exception) {
-                throw new PlaidRequestException('Plaid returned invalid JSON.', 0, $exception);
-            }
-            if (!is_array($decoded)) {
-                throw new PlaidRequestException('Plaid returned an invalid response object.');
-            }
-            return $decoded;
+            return $this->httpClient->request($method, $endpoint, $options);
         } catch (GuzzleException $e) {
-            $this->handleException($e);
+            $this->handleException($e, $streamResponse ? 65536 : null);
         }
     }
 
     public function post(string $endpoint, array $data = []): array
     {
         return $this->request('POST', $endpoint, $data);
+    }
+
+    /** The fixed API environment used for credentialed requests. */
+    public function environment(): string
+    {
+        return (string) ($this->config['environment'] ?? '');
+    }
+
+    public function baseUrl(): string
+    {
+        return $this->baseUrl;
     }
 
     public function get(string $endpoint, array $params = []): array
@@ -111,15 +156,34 @@ class PlaidClient
         return $this->request('PATCH', $endpoint, $data);
     }
 
-    protected function handleException(GuzzleException $exception): void
+    protected function handleException(GuzzleException $exception, ?int $maxErrorBytes = null): void
     {
         if (!method_exists($exception, 'hasResponse') || !$exception->hasResponse()) {
+            if ($maxErrorBytes !== null) {
+                throw new PlaidRequestException('Plaid transport failed.', 0, $exception);
+            }
             throw new PlaidRequestException('Network error: ' . $exception->getMessage(), 0, $exception);
         }
         
         $response = $exception->getResponse();
         $statusCode = $response->getStatusCode();
-        $body = json_decode($response->getBody()->getContents(), true);
+        if ($maxErrorBytes === null) {
+            $rawError = $response->getBody()->getContents();
+        } else {
+            $rawError = '';
+            $stream = $response->getBody();
+            while (!$stream->eof()) {
+                $chunk = $stream->read(min(8192, $maxErrorBytes + 1 - strlen($rawError)));
+                if ($chunk === '' && !$stream->eof()) {
+                    throw new PlaidRequestException('Plaid error response stream stopped unexpectedly.');
+                }
+                $rawError .= $chunk;
+                if (strlen($rawError) > $maxErrorBytes) {
+                    throw new PlaidRequestException('Plaid error response exceeds the supported bound.');
+                }
+            }
+        }
+        $body = json_decode($rawError, true);
         
         $errorMessage = $body['error_message'] ?? 'Unknown error';
         $errorCode = $body['error_code'] ?? 'UNKNOWN_ERROR';

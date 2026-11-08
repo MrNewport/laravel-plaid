@@ -17,7 +17,7 @@ GitHub source and tags are published first. Until the release is indexed on Pack
 
 ## Upgrade from 1.x
 
-HTTP middleware now runs with supplied Guzzle handlers as well as the default handler. Request/response payload logging is removed. POST retries are disabled unless the exact endpoint is listed in `http_options.retry_post_endpoints`; only opt in when the operation is idempotent. This package supplies API services, not webhook signature verification or a ready-made webhook route. Never treat the legacy `webhooks.secret` configuration value as a verified webhook implementation. Tests use mocked HTTP responses; no bank access or money transfers are made.
+HTTP middleware now runs with supplied Guzzle handlers as well as the default handler. Request/response payload logging is removed. POST retries are disabled unless the exact endpoint is listed in `http_options.retry_post_endpoints`; only opt in when the operation is idempotent. The unreleased private candidate adds package-owned `webhookVerification()` using Plaid's ES256/JWK contract. It does not supply an application route, Item authority or replay policy. Never treat the legacy `webhooks.secret` configuration value as a verified webhook implementation. Tests use mocked HTTP responses; no bank access or money transfers are made.
 
 ## Existing API reference
 
@@ -66,7 +66,7 @@ Add your Plaid credentials to your `.env` file:
 ```env
 PLAID_CLIENT_ID=your_client_id
 PLAID_SECRET=your_secret_key
-PLAID_ENVIRONMENT=sandbox # sandbox, development, or production
+PLAID_ENVIRONMENT=sandbox # use sandbox or production for signed webhook verification
 PLAID_VERSION=2020-09-14
 ```
 
@@ -80,9 +80,8 @@ PLAID_RETRY_ENABLED=true
 PLAID_RETRY_MAX_ATTEMPTS=3
 PLAID_RETRY_DELAY=1000
 
-# Webhook Configuration
-PLAID_WEBHOOK_SECRET=your_webhook_secret
-PLAID_WEBHOOK_TOLERANCE=300
+# Plaid webhooks use signed ES256 JWTs, not a shared webhook secret.
+# Leave the historical PLAID_WEBHOOK_SECRET slot unset.
 
 # Logging
 PLAID_LOGGING_ENABLED=false
@@ -137,6 +136,8 @@ foreach ($response['accounts'] as $account) {
 
 ### Get Transactions
 
+The original `sync()` method below is retained for compatibility. Its `Transaction::amount` is a PHP float and its DTO does not retain every source currency/pending field. **Do not use it for exact accounting or infer a posted balance from it.**
+
 ```php
 // Using the new Transactions Sync endpoint (recommended)
 $cursor = $user->plaid_cursor; // Store cursor for incremental updates
@@ -172,6 +173,21 @@ while ($hasMore) {
 $user->plaid_cursor = $cursor;
 $user->save();
 ```
+
+For a read-only financial source, use `syncExact()` instead. It returns `ExactTransaction` objects with `amount_decimal` as the original plain JSON-number text, `iso_currency_code` or `unofficial_currency_code`, `pending`, `pending_transaction_id`, account and transaction IDs, and date. `removed` contains exact account/transaction IDs; the envelope retains `next_cursor`, `has_more`, `request_id` and a SHA-256 of the original response bytes. Quoted amounts, exponent notation, unsupported currencies, missing pending fields and excessively large or complex pages fail closed. The exact path requests a streamed HTTP body and bounds raw and transformed parsing. It never rounds to a float and does not post accounting entries.
+
+```php
+$page = Plaid::transactions()->syncExact($accessToken, $committedCursor, 100);
+foreach ($page['added'] as $transaction) {
+    $sourceAmount = $transaction->amount_decimal; // Exact source text, e.g. "-12.50"
+    $sourceCurrency = $transaction->iso_currency_code;
+    // Validate currency precision and map the source amount in your own domain.
+}
+```
+
+To sync one account, pass its ID as the fifth argument: `syncExact($accessToken, $accountCursor, 100, [], $accountId)`. The package sends `account_id` at the top level of Plaid's request. Keep a separate committed cursor for each account. A cursor from an Item-wide sync or another account must not be reused for that account; start with a null cursor when changing scope. Omitting the fifth argument preserves Item-wide sync.
+
+Stage all pages from the same committed cursor and advance that cursor only after a complete `has_more=false` update. If Plaid reports a mutation during pagination, discard staged pages and restart at the original cursor. Preserve pending removals and posted additions as separate source events; Plaid can return them on different pages. The package supplies transport facts and signed-webhook verification, not consent, tenancy, reconciliation, token storage or transfers.
 
 ### Get Auth Information
 
@@ -350,11 +366,18 @@ try {
 
 ## Webhooks
 
-This package does not implement Plaid webhook signature verification or register a receiver route. The `webhooks.secret` and `webhooks.tolerance` keys are reserved configuration, not an authentication mechanism.
+The verifier checks the exact raw body **before** business fields are read. Plaid publishes an ES256 JWT in `Plaid-Verification`; this package fetches the public JWK by `kid` through the configured Plaid API environment and checks the signature, five-minute issued-at window, and raw-body SHA-256. It bounds the JWT/body size, streamed key response, and key fetches. The host must rate-limit the receiver, bind the verified Item to current tenancy/environment/consent, deduplicate deliveries, and schedule a guarded sync. Never post a journal or transfer from a webhook. No receiver route is registered by this package.
 
-The host must authenticate the provider delivery using a separately reviewed verifier, authorize the item/workspace mapping, durably deduplicate the event and enqueue the appropriate sync job. Only then should application code inspect `webhook_type` and `webhook_code`. Do not expose a receiver that trusts decoded JSON merely because those fields look familiar.
+```php
+$verified = Plaid::webhookVerification()->verify(
+    $request->header('Plaid-Verification', ''), $request->getContent()
+);
+// In your application: look up verified body.item_id in the current environment,
+// check its active tenant/consent, save an immutable deduplicated inbox receipt,
+// then queue the existing guarded transactions sync. Unknown Items fail closed.
+```
 
-See the [handbook](docs/HANDBOOK.md#application-ownership-and-deployment) for the complete application boundary.
+See the [handbook](docs/HANDBOOK.md#application-ownership-and-deployment) for the application boundary.
 
 ## Logging
 

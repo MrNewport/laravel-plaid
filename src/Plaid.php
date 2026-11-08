@@ -20,6 +20,7 @@ use MrNewport\LaravelPlaid\Services\SandboxService;
 use MrNewport\LaravelPlaid\Services\StatementsService;
 use MrNewport\LaravelPlaid\Services\TransactionsService;
 use MrNewport\LaravelPlaid\Services\TransferService;
+use MrNewport\LaravelPlaid\Services\WebhookVerificationService;
 
 class Plaid
 {
@@ -119,6 +120,11 @@ class Plaid
     public function transfer(): TransferService
     {
         return $this->getService(TransferService::class);
+    }
+
+    public function webhookVerification(): WebhookVerificationService
+    {
+        return $this->getService(WebhookVerificationService::class);
     }
 
     protected function getService(string $serviceClass)

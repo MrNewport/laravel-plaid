@@ -1,6 +1,6 @@
 # Laravel Plaid handbook
 
-Laravel Plaid 2.0 provides a Guzzle transport, service wrappers and selected typed data objects for Plaid integrations. It supports Laravel 12/13 and PHP 8.2+, subject to the framework's PHP requirement. It does not provide a banking ledger, tenant authorization, a credential vault, transaction reconciliation, a webhook receiver or a complete synchronization job.
+The current repository provides a Guzzle transport, service wrappers and selected typed data objects for Plaid integrations. This proposed source adds bounded exact transaction sync facts and an ES256 webhook verifier service; the published 2.0 tag does not contain these additions. It supports Laravel 12/13 and PHP 8.2+, subject to the framework's PHP requirement. It does not provide a banking ledger, tenant authorization, a credential vault, transaction reconciliation, a webhook receiver or a complete synchronization job.
 
 This reference describes the implementation in this repository. A wrapper's presence is not a claim that every provider product, region or current response format has been verified against a live account. Review the provider contract and your enabled products before production adoption.
 
@@ -46,7 +46,7 @@ Keep credentials and access tokens on the server. Browser Link tokens are a dist
 
 An unknown environment falls back to the configured sandbox URL. The package does not validate arbitrary application overrides to the base-URL map. Treat all transport configuration as trusted server configuration; do not copy it from a request.
 
-`webhooks.secret`, `webhooks.tolerance` and some `defaults` values exist in configuration, but no webhook verification route or receiver is registered. `LinkTokenService::create()` merges `client_name`, language and country-code defaults; products and other options must be supplied deliberately by the caller.
+`webhooks.secret` remains a reserved legacy key and is not used for signature authentication. The proposed `webhookVerification()` service verifies a Plaid ES256 JWT against the exact raw body, using bounded key fetches; no receiver route is registered. `webhooks.tolerance` remains reserved. `LinkTokenService::create()` merges `client_name`, language and country-code defaults; products and other options must be supplied deliberately by the caller.
 
 ## Resolve a client or service
 
@@ -402,7 +402,7 @@ The method signatures and endpoint names below are taken from the current servic
 
 ## Application ownership and deployment
 
-The host owns user consent, actor/workspace authorization, token encryption/rotation, provider product access, webhook signature verification, duplicate suppression, cursor transactions, accounting mappings and external-side-effect recovery. The package supplies no database tables or security policy for those concerns.
+The host owns user consent, actor/workspace authorization, token encryption/rotation, provider product access, webhook receiver authentication context and Item mapping, duplicate suppression, cursor transactions, accounting mappings and external-side-effect recovery. The proposed verifier checks only the provider signature, issued-at window and exact raw-body hash. The package supplies no database tables or security policy for those concerns.
 
 Bind separate trusted clients when different tenants/environments require different credentials. Long-running singleton clients capture the configuration used at construction. Keep sandbox data and live credentials in distinct application environments.
 
